@@ -1,2 +1,5 @@
 split_genres/
 .vscode/
+config*
+translated_tags_4_character*
+extracted_works*

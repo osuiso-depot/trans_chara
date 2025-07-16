@@ -1,7 +1,12 @@
 import csv
 import wikipediaapi
+import re
 import logging
 import time
+import requests
+from TagRelator import collect_related_tags, get_tags, get_wikipage
+import yaml
+
 from tqdm import tqdm
 
 # ログ設定
@@ -12,8 +17,9 @@ logging.basicConfig(
 )
 
 # Wikipedia API 初期化
-wiki_en = wikipediaapi.Wikipedia('en')
-wiki_ja = wikipediaapi.Wikipedia('ja')
+USER_AGENT = "transbywiki/1.0 (contact: https://github.com/osuiso-depot/trans_chara)"
+wiki_en = wikipediaapi.Wikipedia(language='en', user_agent=USER_AGENT)
+wiki_ja = wikipediaapi.Wikipedia(language='ja', user_agent=USER_AGENT)
 
 def get_japanese_title(english_name: str) -> str:
     """Wikipediaのlanglinkで日本語タイトルを取得する"""
@@ -41,6 +47,28 @@ def load_cache_dict(output_file: str) -> dict:
         pass  # 初回実行時など、ファイルがなくてもOK
     return cache
 
+
+def fallback_pixiv_translation(eng_tag: str) -> str:
+    """
+    Pixiv百科事典から英語タグに該当する日本語名を取得する（暫定）
+    - 例: https://dic.pixiv.net/a/Mystia%20Lorelei
+    """
+    # タグを整形（アンダースコア→スペース）
+    title = eng_tag.replace("_", " ").title()
+    url = f"https://dic.pixiv.net/a/{title}"
+
+    try:
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            # <title>タグを日本語で返す（暫定処理）
+            match = re.search(r"<title>([^<]+)とは.*? - ピクシブ百科事典</title>", response.text)
+            if match:
+                return match.group(1)
+    except Exception as e:
+        logging.info(f"Pixiv取得失敗: {eng_tag} - {e}")
+    return ""
+
+
 def translate_file(input_file: str, output_file: str):
     cache = load_cache_dict(output_file)
 
@@ -63,10 +91,15 @@ def translate_file(input_file: str, output_file: str):
             wiki_search_name = format_wikipedia_name(eng_name)
             jp_name = get_japanese_title(wiki_search_name)
 
+            # Wikipediaで取得できなければPixiv fallback
+            if jp_name == "":
+                jp_name = fallback_pixiv_translation(eng_name)
+
             if jp_name == "":
                 logging.info(f"翻訳失敗: {eng_name}")
             else:
                 cache[eng_name] = jp_name  # 新たにキャッシュに追加
+                print(f"{eng_name} -> {jp_name}")
 
             time.sleep(0.5)  # アクセス制限対策
 
